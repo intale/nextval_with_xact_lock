@@ -1,0 +1,6 @@
+comment = 'nextval_with_xact_lock:  Created by pgrx'
+default_version = '@CARGO_VERSION@'
+module_pathname = 'nextval_with_xact_lock'
+relocatable = false
+superuser = true
+trusted = false
