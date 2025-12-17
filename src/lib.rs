@@ -29,7 +29,7 @@ struct SeqTableData {
     cached: i64,
     increment: i64,
 }
-pub type SeqTable = *mut SeqTableData;
+type SeqTable = *mut SeqTableData;
 
 // typedef struct FormData_pg_sequence_data
 // {
@@ -194,33 +194,7 @@ unsafe fn nextval_internal(relid: pg_sys::Oid, check_permissions: bool) -> i64 {
             (*elm).last = 0;
             (*elm).cached = 0;
         }
-        let seqrel =
-            // lock_and_open_sequence()
-            {
-                let thislxid = pg_sys::MyProc.as_ref().unwrap().lxid;
-                if (*elm).lxid != thislxid {
-                    let current_owner = pg_sys::CurrentResourceOwner;
-                    pg_sys::CurrentResourceOwner = pg_sys::TopTransactionResourceOwner;
-                    pg_sys::LockRelationOid((*elm).relid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
-                    pg_sys::CurrentResourceOwner = current_owner;
-                    (*elm).lxid = thislxid;
-                }
-
-                {
-                    let relation = pg_sys::relation_open((*elm).relid, pg_sys::NoLock as pg_sys::LOCKMODE);
-                    // validate_relation_kind()
-                    {
-                        if (*(*relation).rd_rel).relkind != pg_sys::RELKIND_SEQUENCE as std::ffi::c_char {
-                            pg_sys::ereport!(
-                                pg_sys::elog::PgLogLevel::ERROR,
-                                pg_sys::errcodes::PgSqlErrorCode::ERRCODE_WRONG_OBJECT_TYPE,
-                                format!("cannot open relation {:?}", (*(*relation).rd_rel).relname),
-                            );
-                        }
-                    }
-                    relation
-                }
-            };
+        let seqrel = lock_and_open_sequence(elm);
         if (*(*seqrel).rd_rel).relfilenode != (*elm).filenumber {
             (*elm).filenumber = (*(*seqrel).rd_rel).relfilenode;
             (*elm).cached = (*elm).last;
@@ -406,7 +380,7 @@ unsafe fn nextval_internal(relid: pg_sys::Oid, check_permissions: bool) -> i64 {
             }
         }
         fetch = fetch - 1;
-        if (rescnt < cache) {
+        if rescnt < cache {
             log -= 1;
             rescnt += 1;
             last = next;
@@ -434,7 +408,7 @@ unsafe fn nextval_internal(relid: pg_sys::Oid, check_permissions: bool) -> i64 {
     // 	 * to assign xids subxacts, that'll already trigger an appropriate wait.
     // 	 * (Have to do that here, so we're outside the critical section)
     // 	 */
-    if (logit && relation_needs_wal(seqrel)) {
+    if logit && relation_needs_wal(seqrel) {
         pg_sys::GetTopTransactionId();
     }
 
@@ -473,11 +447,11 @@ unsafe fn nextval_internal(relid: pg_sys::Oid, check_permissions: bool) -> i64 {
         (*seq).log_cnt = 0;
 
         xlrec.locator = (*seqrel).rd_locator;
-        pg_sys::XLogRegisterData(
+        XLogRegisterData(
             (&mut xlrec as *mut XlSeqRec).cast::<std::ffi::c_char>(),
             size_of::<XlSeqRec>() as pg_sys::uint32
         );
-        pg_sys::XLogRegisterData(
+        XLogRegisterData(
             (&mut seqdatatuple.t_data as *mut pg_sys::HeapTupleHeader).cast::<std::ffi::c_char>(),
             seqdatatuple.t_len
         );
@@ -500,6 +474,53 @@ unsafe fn nextval_internal(relid: pg_sys::Oid, check_permissions: bool) -> i64 {
     sequence_close(seqrel, pg_sys::NoLock);
 
     result
+}
+
+
+unsafe fn lock_and_open_sequence(seq: SeqTable) -> pg_sys::Relation {
+    let thislxid = current_proc_lx_id();
+    if (*seq).lxid != thislxid {
+        let current_owner = pg_sys::CurrentResourceOwner;
+        pg_sys::CurrentResourceOwner = pg_sys::TopTransactionResourceOwner;
+        pg_sys::LockRelationOid((*seq).relid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        pg_sys::CurrentResourceOwner = current_owner;
+        (*seq).lxid = thislxid;
+    }
+
+    sequence_open(seq)
+}
+
+#[cfg(any(feature = "pg16"))]
+unsafe fn current_proc_lx_id() -> pg_sys::LocalTransactionId {
+    pg_sys::MyProc.as_ref().unwrap().lxid
+}
+
+#[cfg(any(feature = "pg17", feature = "pg18"))]
+unsafe fn current_proc_lx_id() -> pg_sys::LocalTransactionId {
+    pg_sys::MyProc.as_ref().unwrap().vxid.lxid
+}
+
+unsafe fn sequence_open(seq: SeqTable) -> pg_sys::Relation {
+    let relation = pg_sys::relation_open((*seq).relid, pg_sys::NoLock as pg_sys::LOCKMODE);
+    // validate_relation_kind()
+    if (*(*relation).rd_rel).relkind != pg_sys::RELKIND_SEQUENCE as std::ffi::c_char {
+        pg_sys::ereport!(
+            pg_sys::elog::PgLogLevel::ERROR,
+            pg_sys::errcodes::PgSqlErrorCode::ERRCODE_WRONG_OBJECT_TYPE,
+            format!("cannot open relation {:?}", (*(*relation).rd_rel).relname),
+        );
+    }
+    relation
+}
+
+#[cfg(any(feature = "pg16", feature = "pg17"))]
+unsafe fn XLogRegisterData(data: *mut std::ffi::c_char, len: u32) {
+    pg_sys::XLogRegisterData(data, len);
+}
+
+#[cfg(any(feature = "pg18"))]
+unsafe fn XLogRegisterData(data: *mut std::ffi::c_char, len: u32) {
+    pg_sys::XLogRegisterData(data.cast::<std::ffi::c_void>(), len);
 }
 
 // #define XLogIsNeeded()
