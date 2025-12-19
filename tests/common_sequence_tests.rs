@@ -96,6 +96,70 @@ mod common_sequence_tests {
         }
     }
 
+    mod when_another_transaction_already_holds_advisory_lock_with_the_same_argument {
+        use std::time::Duration;
+        use crate::common_sequence_tests::setup;
+        use crate::support;
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn it_does_wait_for_it() {
+            setup().await;
+            let conn1 = support::connect().await;
+            let conn2 = support::connect().await;
+
+            let thread1 = async {
+                conn1.batch_execute("BEGIN").await.unwrap();
+                conn1.batch_execute("SELECT pg_advisory_xact_lock(1);").await.unwrap();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                conn1.batch_execute("COMMIT").await.unwrap();
+                std::time::SystemTime::now()
+            };
+            let thread2 = async {
+                conn2.batch_execute("BEGIN").await.unwrap();
+                // Wait for the first transaction to start and acquire the lock
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                conn2.batch_execute(
+                    "SELECT nextval_with_xact_lock('my_seq'::regclass)"
+                ).await.unwrap();
+                conn2.batch_execute("COMMIT").await.unwrap();
+                std::time::SystemTime::now()
+            };
+
+            let (val1, val2) = tokio::join!(thread1, thread2);
+            assert!(val2 < val1, "{:?} must be less than {:?}", val2, val1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn it_issues_next_sequence_value() {
+            setup().await;
+            let conn1 = support::connect().await;
+            let conn2 = support::connect().await;
+
+            let thread1 = async {
+                conn1.batch_execute("BEGIN").await.unwrap();
+                conn1.batch_execute("SELECT pg_advisory_xact_lock(1);").await.unwrap();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                conn1.batch_execute("COMMIT").await.unwrap();
+                -1
+            };
+            let thread2 = async {
+                conn2.batch_execute("BEGIN").await.unwrap();
+                // Wait for the first transaction to start and acquire the lock
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let v: i64 = conn2
+                    .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
+                    .await
+                    .unwrap()
+                    .get(0);
+                conn2.batch_execute("COMMIT").await.unwrap();
+                v
+            };
+
+            let (_, next_val) = tokio::join!(thread1, thread2);
+            assert_eq!(next_val, 1, "next val is: {}", next_val);
+        }
+    }
+
     mod when_transaction_gets_commited {
         use std::time::Duration;
         use super::*;

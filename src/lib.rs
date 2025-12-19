@@ -564,7 +564,7 @@ unsafe fn grab_advisory_lock(id: i64) {
         &mut tag as *mut pg_sys::LOCKTAG,
         pg_sys::ExclusiveLock as pg_sys::LOCKMODE,
         false,
-        false,
+        true,
     );
 }
 
