@@ -244,53 +244,11 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
     let minv = (*pgsform).seqmin;
     let cache = (*pgsform).seqcache;
     let cycle = (*pgsform).seqcycle;
-    let buf: pg_sys::Buffer;
+    let mut buf: pg_sys::Buffer = pg_sys::Buffer::default();
     let mut seqdatatuple: pg_sys::HeapTupleData = pg_sys::HeapTupleData::default();
     pg_sys::ReleaseSysCache(pgstuple);
 
-    let seq =
-        // /* lock page buffer and read tuple */
-        // read_seq_tuple()
-        {
-            let seqdatatuple: pg_sys::HeapTuple = &mut seqdatatuple;
-            buf = pg_sys::ReadBuffer(seqrel, 0);
-            pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as c_int);
-            let page = pg_sys::BufferGetPage(buf);
-            let sm = pg_sys::PageGetSpecialPointer(page) as *mut SequenceMagic;
-            if (*sm).magic != SEQ_MAGIC {
-                pg_sys::ereport!(
-                    pg_sys::elog::PgLogLevel::LOG,
-                    pg_sys::errcodes::PgSqlErrorCode::ERRCODE_SUCCESSFUL_COMPLETION,
-                    format!(
-                        "bad magic number in sequence {:?} {:?}",
-                        (*(*seqrel).rd_rel).relname,
-                        (*sm).magic
-                    ),
-                );
-            }
-
-            let lp = pg_sys::PageGetItemId(page, pg_sys::FirstOffsetNumber);
-            assert_eq!((*lp).lp_flags(), pg_sys::LP_NORMAL);
-            (*seqdatatuple).t_data = pg_sys::PageGetItem(page, lp) as pg_sys::HeapTupleHeader;
-            (*seqdatatuple).t_len = (*lp).lp_len();
-
-            // /*
-            // 	 * Previous releases of Postgres neglected to prevent SELECT FOR UPDATE on
-            // 	 * a sequence, which would leave a non-frozen XID in the sequence tuple's
-            // 	 * xmax, which eventually leads to clog access failures or worse. If we
-            // 	 * see this has happened, clean up after it.  We treat this like a hint
-            // 	 * bit update, ie, don't bother to WAL-log it, since we can certainly do
-            // 	 * this again if the update gets lost.
-            // 	 */
-            assert_eq!((*(*seqdatatuple).t_data).t_infomask & pg_sys::HEAP_XMAX_IS_MULTI as u16, 0);
-            if (*(*seqdatatuple).t_data).t_choice.t_heap.t_xmax != pg_sys::InvalidTransactionId {
-                (*(*seqdatatuple).t_data).t_choice.t_heap.t_xmax = pg_sys::InvalidTransactionId;
-                (*(*seqdatatuple).t_data).t_infomask &= !pg_sys::HEAP_XMAX_COMMITTED as u16;
-                (*(*seqdatatuple).t_data).t_infomask |= pg_sys::HEAP_XMAX_INVALID as u16;
-                pg_sys::MarkBufferDirtyHint(buf, true);
-            }
-            pg_sys::GETSTRUCT(seqdatatuple) as Form_pg_sequence_data
-        };
+    let seq = read_seq_tuple(seqrel, &mut buf, seqdatatuple);
     let page = pg_sys::BufferGetPage(buf);
     let mut last: i64;
     let mut next: i64;
@@ -474,6 +432,47 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
     result
 }
 
+unsafe fn read_seq_tuple(rel: pg_sys::Relation, buf: *mut pg_sys::Buffer,
+                         mut seqdatatuple: pg_sys::HeapTupleData) -> Form_pg_sequence_data {
+    let seqtuple: pg_sys::HeapTuple = &mut seqdatatuple;
+    *buf = pg_sys::ReadBuffer(rel, 0);
+    pg_sys::LockBuffer(*buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as c_int);
+    let page = pg_sys::BufferGetPage(*buf);
+    let sm = pg_sys::PageGetSpecialPointer(page) as *mut SequenceMagic;
+    if (*sm).magic != SEQ_MAGIC {
+        pg_sys::ereport!(
+            pg_sys::elog::PgLogLevel::LOG,
+            pg_sys::errcodes::PgSqlErrorCode::ERRCODE_SUCCESSFUL_COMPLETION,
+            format!(
+                "bad magic number in sequence {:?} {:?}",
+                (*(*rel).rd_rel).relname,
+                (*sm).magic
+            ),
+        );
+    }
+
+    let lp = pg_sys::PageGetItemId(page, pg_sys::FirstOffsetNumber);
+    assert_eq!((*lp).lp_flags(), pg_sys::LP_NORMAL);
+    (*seqtuple).t_data = pg_sys::PageGetItem(page, lp) as pg_sys::HeapTupleHeader;
+    (*seqtuple).t_len = (*lp).lp_len();
+
+    // /*
+    // 	 * Previous releases of Postgres neglected to prevent SELECT FOR UPDATE on
+    // 	 * a sequence, which would leave a non-frozen XID in the sequence tuple's
+    // 	 * xmax, which eventually leads to clog access failures or worse. If we
+    // 	 * see this has happened, clean up after it.  We treat this like a hint
+    // 	 * bit update, ie, don't bother to WAL-log it, since we can certainly do
+    // 	 * this again if the update gets lost.
+    // 	 */
+    assert_eq!((*(*seqtuple).t_data).t_infomask & pg_sys::HEAP_XMAX_IS_MULTI as u16, 0);
+    if (*(*seqtuple).t_data).t_choice.t_heap.t_xmax != pg_sys::InvalidTransactionId {
+        (*(*seqtuple).t_data).t_choice.t_heap.t_xmax = pg_sys::InvalidTransactionId;
+        (*(*seqtuple).t_data).t_infomask &= !pg_sys::HEAP_XMAX_COMMITTED as u16;
+        (*(*seqtuple).t_data).t_infomask |= pg_sys::HEAP_XMAX_INVALID as u16;
+        pg_sys::MarkBufferDirtyHint(*buf, true);
+    }
+    pg_sys::GETSTRUCT(seqtuple) as Form_pg_sequence_data
+}
 
 unsafe fn lock_and_open_sequence(seq: SeqTable) -> pg_sys::Relation {
     let thislxid = current_proc_lx_id();
