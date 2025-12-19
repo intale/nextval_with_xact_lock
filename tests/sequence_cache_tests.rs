@@ -40,7 +40,7 @@ mod sequence_cache_tests {
         );
         let persisted_tuple =
             conn
-            .query_one("SELECT * FROM pg_get_sequence_data('my_seq');", &[])
+            .query_one("SELECT * FROM my_seq LIMIT 1;", &[])
             .await
             .unwrap();
 
