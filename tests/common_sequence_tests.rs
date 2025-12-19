@@ -24,7 +24,7 @@ mod common_sequence_tests {
             let thread1 = async {
                 conn1.batch_execute("BEGIN").await.unwrap();
                 let v: i64 = conn1
-                    .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                    .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0);
@@ -36,7 +36,7 @@ mod common_sequence_tests {
             let thread2 = async {
                 conn2.batch_execute("BEGIN").await.unwrap();
                 let v: i64 = conn2
-                    .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                    .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0);
@@ -59,7 +59,7 @@ mod common_sequence_tests {
             let thread1 = async {
                 conn1.batch_execute("BEGIN").await.unwrap();
                 conn1
-                    .batch_execute("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)")
+                    .batch_execute("SELECT nextval_with_xact_lock('my_seq'::regclass)")
                     .await
                     .unwrap();
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -70,7 +70,7 @@ mod common_sequence_tests {
             let thread2 = async {
                 conn2.batch_execute("BEGIN").await.unwrap();
                 conn2
-                    .batch_execute("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)")
+                    .batch_execute("SELECT nextval_with_xact_lock('my_seq'::regclass)")
                     .await
                     .unwrap();
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -107,12 +107,12 @@ mod common_sequence_tests {
             let conn = support::connect().await;
             conn.batch_execute("BEGIN").await.unwrap();
             conn
-                .batch_execute("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)")
+                .batch_execute("SELECT nextval_with_xact_lock('my_seq'::regclass)")
                 .await
                 .unwrap();
             conn.batch_execute("COMMIT").await.unwrap();
             let seq: i64 = conn
-                .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                 .await
                 .unwrap().get(0);
 
@@ -126,7 +126,7 @@ mod common_sequence_tests {
                 let conn = support::connect().await;
                 conn.batch_execute("BEGIN").await.unwrap();
                 conn
-                    .batch_execute("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)")
+                    .batch_execute("SELECT nextval_with_xact_lock('my_seq'::regclass)")
                     .await
                     .unwrap();
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -178,12 +178,12 @@ mod common_sequence_tests {
             let conn = support::connect().await;
             conn.batch_execute("BEGIN").await.unwrap();
             conn
-                .batch_execute("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)")
+                .batch_execute("SELECT nextval_with_xact_lock('my_seq'::regclass)")
                 .await
                 .unwrap();
             conn.batch_execute("ROLLBACK").await.unwrap();
             let seq: i64 = conn
-                .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                 .await
                 .unwrap().get(0);
 
@@ -198,7 +198,7 @@ mod common_sequence_tests {
                 let conn = support::connect().await;
                 conn.batch_execute("BEGIN").await.unwrap();
                 conn
-                    .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                    .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap();
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -248,7 +248,7 @@ mod common_sequence_tests {
             let conn = support::connect().await;
 
             let seq: i64 = conn
-                .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                 .await
                 .unwrap()
                 .get(0);
@@ -261,7 +261,7 @@ mod common_sequence_tests {
             let conn = support::connect().await;
 
             conn
-                .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                 .await
                 .unwrap();
             let locks_count: i64 = conn
@@ -286,7 +286,7 @@ mod common_sequence_tests {
             let conn = support::connect().await;
             conn.batch_execute("START TRANSACTION READ ONLY;").await.unwrap();
             let res = conn
-                .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                 .await;
             conn.batch_execute("ROLLBACK").await.unwrap();
             match res {

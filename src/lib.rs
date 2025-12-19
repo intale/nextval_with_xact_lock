@@ -344,7 +344,7 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
                         pg_sys::elog::PgLogLevel::ERROR,
                         pg_sys::errcodes::PgSqlErrorCode::ERRCODE_SEQUENCE_GENERATOR_LIMIT_EXCEEDED,
                         format!(
-                            "pg_nextval_with_xact_lock: reached maximum value of sequence {:?} ({})",
+                            "nextval_with_xact_lock: reached maximum value of sequence {:?} ({})",
                             (*(*seqrel).rd_rel).relname,
                             maxv
                         ),
@@ -366,7 +366,7 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
                         pg_sys::elog::PgLogLevel::ERROR,
                         pg_sys::errcodes::PgSqlErrorCode::ERRCODE_SEQUENCE_GENERATOR_LIMIT_EXCEEDED,
                         format!(
-                            "pg_nextval_with_xact_lock: reached minimum value of sequence {:?} ({})",
+                            "nextval_with_xact_lock: reached minimum value of sequence {:?} ({})",
                             (*(*seqrel).rd_rel).relname,
                             minv
                         ),
@@ -574,7 +574,7 @@ fn debug_log(str: &str) {
 }
 
 #[pg_extern]
-unsafe fn pg_nextval_with_xact_lock(oid: pg_sys::Oid) -> i64 {
+unsafe fn nextval_with_xact_lock(oid: pg_sys::Oid) -> i64 {
     nextval_with_xact_lock_internal(oid, true)
 }
 
@@ -585,7 +585,7 @@ mod tests {
 
     #[pg_test]
     unsafe fn test_hello_nextval_with_xact_lock() {
-        // assert_eq!(1, crate::pg_nextval_with_xact_lock(pg_sys::Oid::from_u32(1u32)));
+        // assert_eq!(1, crate::nextval_with_xact_lock(pg_sys::Oid::from_u32(1u32)));
     }
 }
 

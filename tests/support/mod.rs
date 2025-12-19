@@ -29,7 +29,10 @@ pub async fn ensure_db_ready() {
 
     let c = connect().await;
 
-    c.batch_execute("CREATE EXTENSION IF NOT EXISTS nextval_with_xact_lock;")
+    c.batch_execute("DROP EXTENSION nextval_with_xact_lock;")
+        .await
+        .unwrap();
+    c.batch_execute("CREATE EXTENSION nextval_with_xact_lock;")
         .await
         .unwrap();
     c.batch_execute("ALTER SYSTEM SET log_statement = 'all';")

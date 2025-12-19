@@ -23,7 +23,7 @@ mod sequence_privileges_tests {
         conn.batch_execute("GRANT UPDATE ON my_seq TO seq_user;").await.unwrap();
         conn.batch_execute("SET LOCAL SESSION AUTHORIZATION seq_user;").await.unwrap();
         let res = conn.query_one(
-            "SELECT pg_nextval_with_xact_lock('my_seq'::regclass);", &[]
+            "SELECT nextval_with_xact_lock('my_seq'::regclass);", &[]
         ).await;
         conn.batch_execute("ROLLBACK;").await.unwrap();
 
@@ -33,7 +33,7 @@ mod sequence_privileges_tests {
             }
             Err(err) => {
                 panic!(
-                    "Expected UPDATE privilege to allow pg_nextval_with_xact_lock() but it didn't. \
+                    "Expected UPDATE privilege to allow nextval_with_xact_lock() but it didn't. \
                     Got error instead: {}",
                     err
                 );
@@ -50,7 +50,7 @@ mod sequence_privileges_tests {
         conn.batch_execute("GRANT USAGE ON my_seq TO seq_user;").await.unwrap();
         conn.batch_execute("SET LOCAL SESSION AUTHORIZATION seq_user;").await.unwrap();
         let res = conn.query_one(
-            "SELECT pg_nextval_with_xact_lock('my_seq'::regclass);", &[]
+            "SELECT nextval_with_xact_lock('my_seq'::regclass);", &[]
         ).await;
         conn.batch_execute("ROLLBACK;").await.unwrap();
 
@@ -60,7 +60,7 @@ mod sequence_privileges_tests {
             }
             Err(err) => {
                 panic!(
-                    "Expected USAGE privilege to allow pg_nextval_with_xact_lock() but it didn't. \
+                    "Expected USAGE privilege to allow nextval_with_xact_lock() but it didn't. \
                     Got error instead: {}",
                     err
                 );
@@ -77,7 +77,7 @@ mod sequence_privileges_tests {
         conn.batch_execute("GRANT SELECT ON my_seq TO seq_user;").await.unwrap();
         conn.batch_execute("SET LOCAL SESSION AUTHORIZATION seq_user;").await.unwrap();
         let res = conn.query_one(
-            "SELECT pg_nextval_with_xact_lock('my_seq'::regclass);", &[]
+            "SELECT nextval_with_xact_lock('my_seq'::regclass);", &[]
         ).await;
         conn.batch_execute("ROLLBACK;").await.unwrap();
 

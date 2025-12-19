@@ -22,14 +22,14 @@ mod custom_sequence_start_value_tests {
 
             seq.push(
                 conn
-                    .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                    .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0)
             );
             seq.push(
                 conn
-                    .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                    .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0)
@@ -56,14 +56,14 @@ mod custom_sequence_start_value_tests {
 
             seq.push(
                 conn
-                    .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                    .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0)
             );
             seq.push(
                 conn
-                    .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                    .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0)

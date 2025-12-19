@@ -26,19 +26,19 @@ mod no_cycle_sequence_tests {
             let mut seq: Vec<i64> = vec![];
 
             seq.push(
-                conn.query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                conn.query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0),
             );
             seq.push(
-                conn.query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                conn.query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0),
             );
             let res = conn
-                .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                 .await;
 
             assert_eq!(seq, vec![1, 6]);
@@ -56,7 +56,7 @@ mod no_cycle_sequence_tests {
                             .unwrap()
                             .to_string()
                             .contains(
-                                "pg_nextval_with_xact_lock: reached maximum value of sequence"
+                                "nextval_with_xact_lock: reached maximum value of sequence"
                             )
                     );
                 }
@@ -87,20 +87,20 @@ mod no_cycle_sequence_tests {
             let mut seq: Vec<i64> = vec![];
 
             seq.push(
-                conn.query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                conn.query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0),
             );
             seq.push(
-                conn.query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                conn.query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                     .await
                     .unwrap()
                     .get(0),
             );
 
             let res = conn
-                .query_one("SELECT pg_nextval_with_xact_lock('my_seq'::regclass)", &[])
+                .query_one("SELECT nextval_with_xact_lock('my_seq'::regclass)", &[])
                 .await;
 
             assert_eq!(seq, vec![-1, -6]);
@@ -118,7 +118,7 @@ mod no_cycle_sequence_tests {
                             .unwrap()
                             .to_string()
                             .contains(
-                                "pg_nextval_with_xact_lock: reached minimum value of sequence"
+                                "nextval_with_xact_lock: reached minimum value of sequence"
                             )
                     );
                 }
