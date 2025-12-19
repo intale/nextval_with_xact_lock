@@ -181,21 +181,7 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
 
         };
         if !hash_is_set {
-            // create_seq_hashtable()
-            let mut ctl: pg_sys::HASHCTL = pg_sys::HASHCTL::default();
-            ctl.keysize = size_of::<pg_sys::Oid>();
-            ctl.entrysize = size_of::<SeqTableData>();
-            let mut lock = SEQHASHTAB.write().unwrap();
-            *lock = Some(
-                HTAB_Ptr(
-                    pg_sys::hash_create(
-                        CString::from_str("Sequence values").unwrap().as_ptr(),
-                        16,
-                        &mut ctl,
-                        (pg_sys::HASH_ELEM | pg_sys::HASH_BLOBS) as c_int,
-                    ),
-                )
-            );
+            create_seq_hashtable();
         }
 
         let htab: *mut pg_sys::HTAB = SEQHASHTAB
@@ -455,6 +441,23 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
     sequence_close(seqrel, pg_sys::NoLock);
 
     result
+}
+
+unsafe fn create_seq_hashtable() {
+    let mut ctl: pg_sys::HASHCTL = pg_sys::HASHCTL::default();
+    ctl.keysize = size_of::<pg_sys::Oid>();
+    ctl.entrysize = size_of::<SeqTableData>();
+    let mut lock = SEQHASHTAB.write().unwrap();
+    *lock = Some(
+        HTAB_Ptr(
+            pg_sys::hash_create(
+                CString::from_str("Sequence values").unwrap().as_ptr(),
+                16,
+                &mut ctl,
+                (pg_sys::HASH_ELEM | pg_sys::HASH_BLOBS) as c_int,
+            ),
+        )
+    );
 }
 
 unsafe fn read_seq_tuple(rel: pg_sys::Relation, buf: *mut pg_sys::Buffer,
