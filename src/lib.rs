@@ -248,6 +248,7 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
     let mut seqdatatuple: pg_sys::HeapTupleData = pg_sys::HeapTupleData::default();
     pg_sys::ReleaseSysCache(pgstuple);
 
+    // /* lock page buffer and read tuple */
     let seq = read_seq_tuple(seqrel, &mut buf, seqdatatuple);
     let page = pg_sys::BufferGetPage(buf);
     let mut last: i64;
