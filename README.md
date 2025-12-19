@@ -22,7 +22,7 @@ The lock is obtained before the sequence is released, thus no other sequence num
 Practical usage example:
 
 ```sql
-ALTER TABLE my_table ALTER COLUMN id SET DEFAULT pg_nextval_with_xact_lock('public.my_table_id_seq'::regclass);
+ALTER TABLE my_table ALTER COLUMN id SET DEFAULT nextval_with_xact_lock('public.my_table_id_seq'::regclass);
 ```
 
 Now you can see uncommited ids in `pg_locks`. Please note, because advisory locks are scoped to the specific database - you can't differentiate between locks, coming from different sequences. Thus, it is meaningless to use this extension for more than one sequence per database.
