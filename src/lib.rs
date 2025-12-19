@@ -7,6 +7,30 @@ use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!(name, version);
 
+// --- PostgreSQL-derived code ---
+// Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
+// Portions Copyright (c) 1994, The Regents of the University of California
+//
+// Permission to use, copy, modify, and distribute this software and its
+// documentation for any purpose, without fee, and without a written agreement
+// is hereby granted, provided that the above copyright notice and this
+// paragraph and the following two paragraphs appear in all copies.
+//
+// IN NO EVENT SHALL THE UNIVERSITY OF CALIFORNIA BE LIABLE TO ANY PARTY FOR
+// DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+// LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS
+// DOCUMENTATION, EVEN IF THE UNIVERSITY OF CALIFORNIA HAS BEEN ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+//
+// THE UNIVERSITY OF CALIFORNIA SPECIFICALLY DISCLAIMS ANY WARRANTIES, ...
+//
+// Source: PostgreSQL src/backend/commands/sequence.c
+// Source: PostgreSQL src/include/commands/sequence.h
+// Source: PostgreSQL src/include/c.h
+//
+// Changes: adapted to Rust and added grab_advisory_lock() calls where applicable in accordance with
+// the objectives of this project
+
 // struct SeqTableData
 // {
 // 	Oid			relid;			/* pg_class OID of this sequence (hash key) */
@@ -546,6 +570,8 @@ unsafe fn relation_needs_wal(relation: pg_sys::Relation) -> bool {
 unsafe fn sequence_close(relation: pg_sys::Relation, lock_mode: u32) {
     pg_sys::relation_close(relation, lock_mode as pg_sys::LOCKMODE);
 }
+
+// --- end PostgreSQL-derived notice ---
 
 unsafe fn grab_advisory_lock(id: i64) {
     let mut tag: pg_sys::LOCKTAG = std::mem::zeroed();
