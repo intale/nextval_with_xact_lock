@@ -580,25 +580,45 @@ unsafe fn sequence_close(relation: pg_sys::Relation, lock_mode: u32) {
 
 // --- end PostgreSQL-derived notice ---
 
+
+#[macro_export]
+macro_rules! grab_advisory_lock {
+    ( $x:expr ) => {{
+        let mut tag: pg_sys::LOCKTAG = std::mem::zeroed();
+
+        let key = $x as u64;
+        // Equivalent to SET_LOCKTAG_INT64(tag, key64) from src/backend/utils/adt/lockfuncs.c
+        tag.locktag_field1 = pg_sys::MyDatabaseId.to_u32();
+        tag.locktag_field2 = (key >> 32) as u32;
+        tag.locktag_field3 = key as u32;
+        tag.locktag_field4 = 1; // 1 means we are using i64 value which we split among field2 and field3
+        tag.locktag_type = pg_sys::LockTagType::LOCKTAG_ADVISORY as u8;
+        // USER_LOCKMETHOD for transaction level advisory locks
+        tag.locktag_lockmethodid = pg_sys::USER_LOCKMETHOD as u8;
+
+        pg_sys::LockAcquire(
+            &mut tag as *mut pg_sys::LOCKTAG,
+            pg_sys::ExclusiveLock as pg_sys::LOCKMODE,
+            false,
+            true,
+        );
+    }};
+}
+
+#[cfg(not(feature = "lock_tests"))]
 unsafe fn grab_advisory_lock(id: i64) {
-    let mut tag: pg_sys::LOCKTAG = std::mem::zeroed();
+    grab_advisory_lock!(id);
+}
 
-    let key = id as u64;
-    // Equivalent to SET_LOCKTAG_INT64(tag, key64) from src/backend/utils/adt/lockfuncs.c
-    tag.locktag_field1 = pg_sys::MyDatabaseId.to_u32();
-    tag.locktag_field2 = (key >> 32) as u32;
-    tag.locktag_field3 = key as u32;
-    tag.locktag_field4 = 1; // 1 means we are using i64 value which we split among field2 and field3
-    tag.locktag_type = pg_sys::LockTagType::LOCKTAG_ADVISORY as u8;
-    // USER_LOCKMETHOD for transaction level advisory locks
-    tag.locktag_lockmethodid = pg_sys::USER_LOCKMETHOD as u8;
-
-    pg_sys::LockAcquire(
-        &mut tag as *mut pg_sys::LOCKTAG,
-        pg_sys::ExclusiveLock as pg_sys::LOCKMODE,
-        false,
-        true,
-    );
+#[cfg(feature = "lock_tests")]
+unsafe fn grab_advisory_lock(id: i64) {
+    let oid = pg_sys::GetSessionUserId();
+    let name_ptr = pg_sys::GetUserNameFromId(oid, false);
+    let uname = std::ffi::CStr::from_ptr(name_ptr).to_string_lossy().into_owned();
+    if uname == "lock_tests_thread1" {
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+    }
+    grab_advisory_lock!(id);
 }
 
 #[allow(dead_code)]
