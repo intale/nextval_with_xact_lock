@@ -1,7 +1,6 @@
 use std::ffi::{c_int, CString};
 use std::mem::size_of;
 use std::str::FromStr;
-use std::sync::RwLock;
 use pgrx::prelude::*;
 
 
@@ -161,60 +160,39 @@ impl Default for XlSeqRec {
 // #define XLOG_SEQ_LOG			0x00
 const XLOG_SEQ_LOG: u8 = 0x00;
 
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-struct HTAB_Ptr(*mut pg_sys::HTAB);
-
+// Backend is single-threaded, so it is safe to use a raw static pointer
 // Safety: PostgreSQL dynahash tables live in a global memory context and are
-// only accessed inside the backend's single-threaded execution. We mark this
-// wrapper Send + Sync to allow storing the pointer in a global RwLock.
-unsafe impl Send for HTAB_Ptr {}
-unsafe impl Sync for HTAB_Ptr {}
+// only accessed inside the backend's single-threaded execution., thus it is safe to use a raw
+// static pointer. See also get_seq_hashtab()
+#[allow(non_camel_case_types)]
+static mut SEQHASHTAB: *mut pg_sys::HTAB = std::ptr::null_mut();
 
-static SEQHASHTAB: RwLock<Option<HTAB_Ptr>> = RwLock::new(None);
+// Helper to lazily initialize the sequence hash table in TopMemoryContext
+unsafe fn get_seq_hashtab() -> *mut pg_sys::HTAB {
+    if SEQHASHTAB.is_null() {
+        let mut ctl: pg_sys::HASHCTL = pg_sys::HASHCTL::default();
+        ctl.keysize = size_of::<pg_sys::Oid>();
+        ctl.entrysize = size_of::<SeqTableData>();
+
+        // Switch to TopMemoryContext so the table lives for backend lifetime
+        let old_ctx = pg_sys::CurrentMemoryContext;
+        pg_sys::CurrentMemoryContext = pg_sys::TopMemoryContext;
+        SEQHASHTAB = pg_sys::hash_create(
+            b"Sequence values\0".as_ptr().cast(),
+            16,
+            &mut ctl,
+            (pg_sys::HASH_ELEM | pg_sys::HASH_BLOBS) as c_int,
+        );
+        pg_sys::CurrentMemoryContext = old_ctx;
+    }
+    SEQHASHTAB
+}
 
 unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions: bool) -> i64 {
-    // init_sequence()
-    let (elm, seqrel) = unsafe {
-        let elm: SeqTable;
-        let hash_is_set = {
-            match *SEQHASHTAB.read().unwrap() {
-                Some(_) => true,
-                None => false,
-            }
+    let mut elm: SeqTable = SeqTable::default();
+    let mut seqrel: pg_sys::Relation = pg_sys::Relation::default();
 
-        };
-        if !hash_is_set {
-            create_seq_hashtable();
-        }
-
-        let htab: *mut pg_sys::HTAB = SEQHASHTAB
-            .read()
-            .unwrap()
-            .expect("sequence hash table not initialized").0;
-        let mut found: bool = false;
-
-        elm = pg_sys::hash_search(
-            htab,
-            (&relid as *const pg_sys::Oid).cast::<std::ffi::c_void>(),
-            pg_sys::HASHACTION::HASH_ENTER,
-            &mut found,
-        ) as SeqTable;
-
-        if !found {
-            (*elm).filenumber = pg_sys::InvalidOid;
-            (*elm).lxid = pg_sys::InvalidLocalTransactionId;
-            (*elm).last_valid = false;
-            (*elm).last = 0;
-            (*elm).cached = 0;
-        }
-        let seqrel = lock_and_open_sequence(elm);
-        if (*(*seqrel).rd_rel).relfilenode != (*elm).filenumber {
-            (*elm).filenumber = (*(*seqrel).rd_rel).relfilenode;
-            (*elm).cached = (*elm).last;
-        }
-        (elm, seqrel)
-    };
+    init_sequence(relid, &mut elm, &mut seqrel);
 
     if check_permissions &&
         pg_sys::pg_class_aclcheck(
@@ -263,7 +241,7 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
     pg_sys::ReleaseSysCache(pgstuple);
 
     // /* lock page buffer and read tuple */
-    let seq = read_seq_tuple(seqrel, &mut buf, seqdatatuple);
+    let seq = read_seq_tuple(seqrel, &mut buf, &mut seqdatatuple);
     let page = pg_sys::BufferGetPage(buf);
     let mut last: i64;
     let mut next: i64;
@@ -423,7 +401,7 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
             size_of::<XlSeqRec>() as pg_sys::uint32
         );
         XLogRegisterData(
-            (&mut seqdatatuple.t_data as *mut pg_sys::HeapTupleHeader).cast::<std::ffi::c_char>(),
+            seqdatatuple.t_data as *mut std::ffi::c_char,
             seqdatatuple.t_len
         );
 
@@ -447,34 +425,62 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
     result
 }
 
-unsafe fn create_seq_hashtable() {
-    let mut ctl: pg_sys::HASHCTL = pg_sys::HASHCTL::default();
-    ctl.keysize = size_of::<pg_sys::Oid>();
-    ctl.entrysize = size_of::<SeqTableData>();
-    let mut lock = SEQHASHTAB.write().unwrap();
-    *lock = Some(
-        HTAB_Ptr(
-            pg_sys::hash_create(
-                CString::from_str("Sequence values").unwrap().as_ptr(),
-                16,
-                &mut ctl,
-                (pg_sys::HASH_ELEM | pg_sys::HASH_BLOBS) as c_int,
-            ),
-        )
-    );
+unsafe fn init_sequence(relid: pg_sys::Oid, p_elm: *mut SeqTable, p_rel: *mut pg_sys::Relation) {
+    let elm: SeqTable;
+    let seqrel: pg_sys::Relation;
+    let mut found: bool = false;
+
+    // ensure hash table exists
+    let htab = get_seq_hashtab();
+
+    elm = pg_sys::hash_search(
+        htab,
+        (&relid as *const pg_sys::Oid).cast::<std::ffi::c_void>(),
+        pg_sys::HASHACTION::HASH_ENTER,
+        &mut found,
+    ) as SeqTable;
+
+    // /*
+    //  * Initialize the new hash table entry if it did not exist already.
+    //  *
+    //  * NOTE: seqhashtab entries are stored for the life of a backend (unless
+    //  * explicitly discarded with DISCARD). If the sequence itself is deleted
+    //  * then the entry becomes wasted memory, but it's small enough that this
+    //  * should not matter.
+    //  */
+    if !found {
+        (*elm).filenumber = pg_sys::InvalidOid;
+        (*elm).lxid = pg_sys::InvalidLocalTransactionId;
+        (*elm).last_valid = false;
+        (*elm).last = 0;
+        (*elm).cached = 0;
+    }
+    seqrel = lock_and_open_sequence(elm);
+
+    // /*
+    //  * If the sequence has been transactionally replaced since we last saw it,
+    //  * discard any cached-but-unissued values.  We do not touch the currval()
+    //  * state, however.
+    //  */
+    if (*(*seqrel).rd_rel).relfilenode != (*elm).filenumber {
+        (*elm).filenumber = (*(*seqrel).rd_rel).relfilenode;
+        (*elm).cached = (*elm).last;
+    }
+    *p_elm = elm;
+    *p_rel = seqrel;
+
 }
 
 unsafe fn read_seq_tuple(rel: pg_sys::Relation, buf: *mut pg_sys::Buffer,
-                         mut seqdatatuple: pg_sys::HeapTupleData) -> Form_pg_sequence_data {
-    let seqtuple: pg_sys::HeapTuple = &mut seqdatatuple;
+                         seqdatatuple: pg_sys::HeapTuple) -> Form_pg_sequence_data {
     *buf = pg_sys::ReadBuffer(rel, 0);
     pg_sys::LockBuffer(*buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as c_int);
     let page = pg_sys::BufferGetPage(*buf);
     let sm = pg_sys::PageGetSpecialPointer(page) as *mut SequenceMagic;
     if (*sm).magic != SEQ_MAGIC {
         pg_sys::ereport!(
-            pg_sys::elog::PgLogLevel::LOG,
-            pg_sys::errcodes::PgSqlErrorCode::ERRCODE_SUCCESSFUL_COMPLETION,
+            pg_sys::elog::PgLogLevel::ERROR,
+            pg_sys::errcodes::PgSqlErrorCode::ERRCODE_DATA_CORRUPTED,
             format!(
                 "bad magic number in sequence {:?} {:?}",
                 (*(*rel).rd_rel).relname,
@@ -484,9 +490,11 @@ unsafe fn read_seq_tuple(rel: pg_sys::Relation, buf: *mut pg_sys::Buffer,
     }
 
     let lp = pg_sys::PageGetItemId(page, pg_sys::FirstOffsetNumber);
+    // ItemIdIsNormal()
     assert_eq!((*lp).lp_flags(), pg_sys::LP_NORMAL);
-    (*seqtuple).t_data = pg_sys::PageGetItem(page, lp) as pg_sys::HeapTupleHeader;
-    (*seqtuple).t_len = (*lp).lp_len();
+
+    (*seqdatatuple).t_data = pg_sys::PageGetItem(page, lp) as pg_sys::HeapTupleHeader;
+    (*seqdatatuple).t_len = (*lp).lp_len();
 
     // /*
     // 	 * Previous releases of Postgres neglected to prevent SELECT FOR UPDATE on
@@ -496,14 +504,14 @@ unsafe fn read_seq_tuple(rel: pg_sys::Relation, buf: *mut pg_sys::Buffer,
     // 	 * bit update, ie, don't bother to WAL-log it, since we can certainly do
     // 	 * this again if the update gets lost.
     // 	 */
-    assert_eq!((*(*seqtuple).t_data).t_infomask & pg_sys::HEAP_XMAX_IS_MULTI as u16, 0);
-    if (*(*seqtuple).t_data).t_choice.t_heap.t_xmax != pg_sys::InvalidTransactionId {
-        (*(*seqtuple).t_data).t_choice.t_heap.t_xmax = pg_sys::InvalidTransactionId;
-        (*(*seqtuple).t_data).t_infomask &= !pg_sys::HEAP_XMAX_COMMITTED as u16;
-        (*(*seqtuple).t_data).t_infomask |= pg_sys::HEAP_XMAX_INVALID as u16;
+    assert_eq!((*(*seqdatatuple).t_data).t_infomask & pg_sys::HEAP_XMAX_IS_MULTI as u16, 0);
+    if (*(*seqdatatuple).t_data).t_choice.t_heap.t_xmax != pg_sys::InvalidTransactionId {
+        (*(*seqdatatuple).t_data).t_choice.t_heap.t_xmax = pg_sys::InvalidTransactionId;
+        (*(*seqdatatuple).t_data).t_infomask &= !pg_sys::HEAP_XMAX_COMMITTED as u16;
+        (*(*seqdatatuple).t_data).t_infomask |= pg_sys::HEAP_XMAX_INVALID as u16;
         pg_sys::MarkBufferDirtyHint(*buf, true);
     }
-    pg_sys::GETSTRUCT(seqtuple) as Form_pg_sequence_data
+    pg_sys::GETSTRUCT(seqdatatuple) as Form_pg_sequence_data
 }
 
 unsafe fn lock_and_open_sequence(seq: SeqTable) -> pg_sys::Relation {
