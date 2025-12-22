@@ -35,7 +35,7 @@ Because original sequence functions `nextval()`, `currval()`, `lastval()` and `s
 
 ### Running tests
 
-To run integration tests you can use `./bin/run_tests.sh` script. This will run tests for the latest supported PostgreSQL version. You can supply `PGVER` environment variable to provide different version. You also can provide a test pattern matching as a first argument. Examples:
+To run integration tests you can use `./bin/run_tests.sh` script. This will run tests for the latest supported PostgreSQL version. You can supply `PGVER` environment variable to provide different version. You can also provide a test pattern matching as a first argument. Examples:
 
 ```bash
 # Run tests for the latest supported PostgreSQL version
@@ -46,10 +46,13 @@ PGVER=16 ./bin/run_tests.sh
 ./bin/run_tests.sh cycle_sequence_tests
 ```
 
-To run tests for all versions you can use `./bin/run_all_tests.sh`
+To run tests for all versions you can use `./bin/run_all_tests.sh`. You can also provide a test pattern matching as a first argument.
 
 ```bash
+# Run all tests
 ./bin/run_all_tests.sh
+# Run specific tests
+./bin/run_all_tests.sh cycle_sequence_tests
 ```
 
 ## Contributing
