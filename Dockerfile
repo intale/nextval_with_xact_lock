@@ -9,8 +9,10 @@ RUN apt-get update && apt-get install -y bison flex clang
 
 WORKDIR /build/extension
 
-COPY . .
 RUN cargo pgrx init "--pg${PGVER}" download
+
+COPY . .
+
 RUN cargo pgrx package --no-default-features --features "pg${PGVER}" -c "$(cargo pgrx info pg-config "pg$PGVER")"
 RUN PKGDIR="$(find target/release -maxdepth 5 -type d -name "pgrx-install" -print -quit)";  \
     test -n "$PKGDIR";  \
