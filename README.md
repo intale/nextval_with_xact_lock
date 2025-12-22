@@ -31,7 +31,52 @@ Now you can see uncommited ids in `pg_locks`. Please note, because advisory lock
 
 Because original sequence functions `nextval()`, `currval()`, `lastval()` and `setval()` are implemented in a way they rely on private global in-memory state - `nextval_with_xact_lock()`, implemented in this extension, is not compatible with them. Thus, the only info you can have is last persisted value of the sequence, retrieved by reading directly from your sequence table, e.g. `SELECT last_value FROM my_sequence LIMIT 1`. Potential `currval()`, `lastval()` and `setval()` alternatives that would work with `nextval_with_xact_lock()` should be implemented separately which is not planed yet, but the contribution is very welcome.  
 
+## Installation
+
+There is prepared `Dockerfile` that builds a PostgreSQL image with `nextval_with_xact_lock` extension installed. It builds PostgreSQL v18 by default. You can supply `PGVER` build argument to change PostreSQL version. Examples:
+
+```bash
+# Build PostgreSQL v18 image with nextval_with_xact_lock installed
+docker build . -t "your_pg_repo/postgresql-nextval_with_xact_lock:18"
+# Build PostgreSQL v17 image with nextval_with_xact_lock installed
+docker build . -t "your_pg_repo/postgresql-nextval_with_xact_lock:17" --build-arg PGVER=17
+```
+
+Now you can push it to your own repo:
+
+```bash
+docker push your_pg_repo/postgresql-nextval_with_xact_lock:18
+```
+
 ## Development
+
+### Setup
+
+- install Rust https://rust-lang.org/tools/install/
+- install pgrx https://github.com/pgcentralfoundation/pgrx?tab=readme-ov-file#getting-started (install + initialize) - a framework for developing PostgreSQL extensions in Rust
+
+### Playing around with the extension
+
+- enter PostgreSQL console:
+```bash
+cargo pgrx run
+```
+Optionally you can provide `--features pg<version>` to run under specific version:
+```bash
+cargo pgrx run --features pg17
+```
+- create extension:
+```sql
+CREATE EXTENSION nextval_with_xact_lock;
+```
+- create some test sequence:
+```sql
+CREATE SEQUENCE my_seq;
+```
+- use `nextval_with_xact_lock()` to retrieve next sequence value:
+```sql
+SELECT nextval_with_xact_lock('my_seq'::regclass);
+```
 
 ### Running tests
 
