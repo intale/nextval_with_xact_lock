@@ -363,7 +363,7 @@ mod common_sequence_tests {
                 Err(err) => {
                     assert_eq!(
                         err.source().unwrap().to_string(),
-                        "ERROR: cannot execute Sequence values in a read-only transaction"
+                        "ERROR: cannot execute nextval_with_xact_lock() in a read-only transaction"
                     );
                 }
             }

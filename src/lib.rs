@@ -1,7 +1,7 @@
-use std::ffi::{c_int, CString};
+use std::ffi::{c_int};
 use std::mem::size_of;
-use std::str::FromStr;
 use pgrx::prelude::*;
+use pgrx::prelude::PgTryBuilder;
 
 
 ::pgrx::pg_module_magic!(name, version);
@@ -175,15 +175,14 @@ unsafe fn get_seq_hashtab() -> *mut pg_sys::HTAB {
         ctl.entrysize = size_of::<SeqTableData>();
 
         // Switch to TopMemoryContext so the table lives for backend lifetime
-        let old_ctx = pg_sys::CurrentMemoryContext;
-        pg_sys::CurrentMemoryContext = pg_sys::TopMemoryContext;
+        let old_ctx = pg_sys::MemoryContextSwitchTo(pg_sys::TopMemoryContext);
         SEQHASHTAB = pg_sys::hash_create(
             b"Sequence values\0".as_ptr().cast(),
             16,
             &mut ctl,
             (pg_sys::HASH_ELEM | pg_sys::HASH_BLOBS) as c_int,
         );
-        pg_sys::CurrentMemoryContext = old_ctx;
+        pg_sys::MemoryContextSwitchTo(old_ctx);
     }
     SEQHASHTAB
 }
@@ -208,15 +207,28 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
     }
 
     if !(*seqrel).rd_islocaltemp {
-        pg_sys::PreventCommandIfReadOnly(CString::from_str("Sequence values").unwrap().as_ptr());
+        pg_sys::PreventCommandIfReadOnly(b"nextval_with_xact_lock()\0".as_ptr().cast());
     }
+
+    // /*
+    //  * Forbid this during parallel operation because, to make it work, the
+    //  * cooperating backends would need to share the backend-local cached
+    //  * sequence information.  Currently, we don't support that.
+    //  */
+    pg_sys::PreventCommandIfParallelMode(b"nextval_with_xact_lock()\0".as_ptr().cast());
 
     if (*elm).last != (*elm).cached {
         assert!((*elm).last_valid);
         assert_ne!((*elm).increment, 0);
         (*elm).last += (*elm).increment;
 
-        grab_advisory_lock((*elm).last);
+        PgTryBuilder::new(|| {
+            grab_advisory_lock((*elm).last);
+        }).catch_others(|error| {
+            sequence_close(seqrel, pg_sys::NoLock);
+            error.rethrow();
+        }).execute();
+
         sequence_close(seqrel, pg_sys::NoLock);
         return (*elm).last;
     }
@@ -225,8 +237,8 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
     );
     if pgstuple.is_null() {
         pg_sys::ereport!(
-            pg_sys::elog::PgLogLevel::LOG,
-            pg_sys::errcodes::PgSqlErrorCode::ERRCODE_SUCCESSFUL_COMPLETION,
+            pg_sys::elog::PgLogLevel::ERROR,
+            pg_sys::errcodes::PgSqlErrorCode::ERRCODE_UNDEFINED_OBJECT,
             format!("cache lookup failed for sequence {:?}", relid),
         );
     }
@@ -280,6 +292,7 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
         if pg_sys::PageGetLSN(page) <= redoptr {
             /* last update of seq was before checkpoint */
             fetch = fetch + SEQ_LOG_VALS;
+            log = fetch;
             logit = true;
         }
     }
@@ -418,9 +431,22 @@ unsafe fn nextval_with_xact_lock_internal(relid: pg_sys::Oid, check_permissions:
     assert!(pg_sys::CritSectionCount > 0);
     pg_sys::CritSectionCount -= 1;
 
-    grab_advisory_lock(result);
-    pg_sys::UnlockReleaseBuffer(buf);
-    sequence_close(seqrel, pg_sys::NoLock);
+    let close_buffer_and_unlock_sequence = || {
+        pg_sys::UnlockReleaseBuffer(buf);
+        sequence_close(seqrel, pg_sys::NoLock);
+    };
+
+    // If grab_advisory_lock() throws an error(e.g. OutOfMemoryError) - we must ensure the buffer
+    // and the sequence are closed. In this case, we can re-raise the error, which will cause the
+    // potential transaction within which this code is executed to be rolled back.
+    PgTryBuilder::new(|| {
+        grab_advisory_lock(result);
+    }).catch_others(|error| {
+        close_buffer_and_unlock_sequence();
+        error.rethrow();
+    }).execute();
+
+    close_buffer_and_unlock_sequence();
 
     result
 }
